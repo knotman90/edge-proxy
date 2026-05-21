@@ -1,0 +1,46 @@
+# edge-proxy — single Caddy instance that fronts every app on this host.
+#
+# Apps don't ship their own Caddy. They drop a site snippet into ./sites.d/
+# (via bin/install-site.sh) and attach their public-facing containers to the
+# shared external network `edge`.
+#
+# Each app stays isolated: only the container(s) the app exposes touch the
+# `edge` network. Databases, workers, etc. stay on the app's own private
+# network and remain unreachable from anything outside that app.
+
+name: edge
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: edge-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CADDY_EMAIL: ${CADDY_EMAIL:-}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites.d:/etc/caddy/sites.d:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  edge:
+    name: edge
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,10 @@
+# Global options. Per-app site blocks live in sites.d/*.caddy and are
+# loaded via `import` below. Apps drop their snippet through
+# bin/install-site.sh during deploy.
+
+{
+	email {$CADDY_EMAIL}
+	acme_ca {$ACME_CA}
+}
+
+import /etc/caddy/sites.d/*.caddy
