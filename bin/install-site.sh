@@ -48,14 +48,15 @@ fi
 # collapses to empty string, which we treat as a config error.
 envsubst < "$SRC" > "$RENDERED"
 
-# Surface unresolved variables loudly. We grep the original template for
-# referenced names and verify each was set in the environment.
+# Surface unresolved variables loudly. We strip Caddyfile-style comments
+# first (anything from `#` to end-of-line) so references inside doc
+# comments don't count as missing vars.
 MISSING=()
 while IFS= read -r var; do
   if [[ -z "${!var-}" ]]; then
     MISSING+=("$var")
   fi
-done < <(grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' "$SRC" | sed -E 's/\$\{([A-Za-z0-9_]+)\}/\1/' | sort -u)
+done < <(sed 's/#.*//' "$SRC" | grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' | sed -E 's/\$\{([A-Za-z0-9_]+)\}/\1/' | sort -u)
 
 if (( ${#MISSING[@]} > 0 )); then
   echo "Template references vars that are not set: ${MISSING[*]}" >&2
@@ -71,12 +72,13 @@ fi
 log "Installing snippet ${NAME}.caddy"
 cp "$RENDERED" "$DEST"
 
-# Validate inside the running container before reloading. If validation
-# fails we leave the old snippet in place to avoid a broken edge.
-if ! docker exec edge-caddy caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+# Validate inside the running container before reloading. We capture the
+# output BEFORE reverting so the actual error is visible — otherwise a
+# post-revert validate would report the (now-passing) prior state.
+if ! VALIDATE_OUT=$(docker exec edge-caddy caddy validate --config /etc/caddy/Caddyfile 2>&1); then
   echo "Caddy config validation failed — reverting" >&2
+  echo "$VALIDATE_OUT" >&2
   rm -f "$DEST"
-  docker exec edge-caddy caddy validate --config /etc/caddy/Caddyfile >&2 || true
   exit 1
 fi
 
