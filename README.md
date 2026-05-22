@@ -74,14 +74,29 @@ networks:
     external: true
 ```
 
-App-side snippet example (`deploy/site.caddy`):
+App-side snippet template (`deploy/site.caddy`):
 
 ```caddy
-myapp.example.com {
+${MYAPP_DOMAIN} {
     encode zstd gzip
     reverse_proxy myapp-web:80
 }
 ```
+
+The template may use `${VAR}` references. `install-site.sh` runs `envsubst`
+on it at install time using the caller's environment, so what lands in
+`sites.d/` is a fully-rendered file with literal values. Caddy never sees
+env-var indirection — that keeps `caddy reload` graceful (no container
+restart needed when adding apps or rotating domains).
+
+The caller must export the referenced vars before invoking:
+
+```bash
+MYAPP_DOMAIN=myapp.example.com ~/edge/bin/install-site.sh myapp deploy/site.caddy
+```
+
+If a referenced var is unset, the install aborts loudly before touching
+`sites.d/`.
 
 Container names (`myapp-web` above) must be stable for Caddy's DNS lookups to
 work, so apps should pin `container_name:` in their compose.
