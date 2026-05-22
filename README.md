@@ -137,3 +137,53 @@ docker compose up -d
 - App-specific site blocks. Those live in the app's repo at
   `deploy/site.caddy` and get copied here at deploy time.
 - The actual `.env`. Production values live on the host.
+
+## Real-world example
+
+A live setup hosting two apps (`blink` + `patente-nautica`) on a single
+Hetzner CX22 with the box layout below. Sub-resources of each app stay
+fully isolated; only the public-facing container of each app joins the
+shared `edge` network.
+
+```
+host (Hetzner CX22)
+├── /home/admin/edge/                  ← this repo, checked out at v0.2.1
+│   ├── docker-compose.yml             ← caddy + the shared `edge` network
+│   ├── Caddyfile                      ← imports sites.d/*.caddy
+│   ├── sites.d/
+│   │   ├── blink.caddy                ← installed by app1's deploy script
+│   │   └── patente-nautica.caddy      ← installed by app2's deploy script
+│   └── .env                           ← CADDY_EMAIL only
+│
+├── /home/admin/blink/monorepo/        ← app 1 (private repo, deploy keys)
+│   ├── docker-compose.yml
+│   ├── docker-compose.edge.yml        ← attaches mobile-web + api to edge
+│   └── deploy/site.caddy              ← template; installed via envsubst
+│
+├── /home/admin/nautica-trainer/       ← app 2 (rsynced from laptop)
+│   └── infra/
+│       ├── compose.yml + compose.edge.yml + compose.build.yml
+│       └── deploy/site.caddy
+│
+├── /mnt/HC_Volume_104514901/          ← Hetzner Volume (separate disk)
+│   ├── blink-backups/                 ← pg_dump rotation
+│   └── nautica-backups/
+│
+docker networks:
+  edge                                 ← shared; only public-facing containers attach
+  blink_backend-network                ← private to blink
+  patente-nautica_internal             ← private to nautica
+```
+
+DNS via [nip.io](https://nip.io): each app gets a subdomain
+(`blink.46-225-27-111.nip.io`, `nautica-trainer.46-225-27-111.nip.io`)
+that resolves to the same host IP. Caddy auto-issues per-hostname
+Let's Encrypt certs via HTTP-01.
+
+Onboarding a third app on the same host:
+1. Define `container_name` on the public-facing service (for stable DNS).
+2. Declare the `edge` network as `external: true` in its compose.
+3. Drop a `deploy/site.caddy` template using `${MYAPP_DOMAIN}` syntax.
+4. App's deploy script: `MYAPP_DOMAIN=foo.<ip>.nip.io ~/edge/bin/install-site.sh myapp deploy/site.caddy`.
+
+No edits to existing apps required. `caddy reload` is graceful.
